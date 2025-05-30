@@ -4,5 +4,4 @@ services:
     env: python
     root: meu_projeto
     buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
- 
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
