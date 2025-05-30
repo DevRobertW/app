@@ -117,9 +117,8 @@ def index():
     )
 
 
+
 if __name__ == "__main__":
     from os import environ
-    port = int(environ.get("PORT", 5001))  # Usa a porta do ambiente ou 5001 como padrão
+    port = int(environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
-
