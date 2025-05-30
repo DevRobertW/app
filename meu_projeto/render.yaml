@@ -1,8 +1,8 @@
 services:
   - type: web
-    name: app-flask
+    name: meu-projeto
     env: python
-    plan: free
-    root: meu_projeto    # <-- aqui você informa a subpasta onde está o app e o requirements.txt
+    root: meu_projeto
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
+ 
