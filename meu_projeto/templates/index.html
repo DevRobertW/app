@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Consulta de Viagens</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        .tabela-scroll {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-top: 20px;
+        }
+        form .form-control {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body class="container mt-4">
+    <h2>Consulta de Viagens</h2>
+    <form method="POST" class="form-group">
+        <label>Data:</label>
+        <input type="text" name="data" class="form-control" value="{{ data }}">
+
+        <label>Atividade:</label>
+        <input type="text" name="atividade" class="form-control" value="{{ filtros.atividade }}">
+
+        <label>Linha:</label>
+        <input type="text" name="linha" class="form-control" value="{{ filtros.linha }}">
+
+        <label>Veículo:</label>
+        <input type="text" name="veiculo" class="form-control" value="{{ filtros.veiculo }}">
+
+        <label>Sentido:</label>
+        <input type="text" name="sentido" class="form-control" value="{{ filtros.sentido }}">
+
+        <label>Tabela:</label>
+        <input type="text" name="tabela" class="form-control" value="{{ filtros.tabela }}">
+
+        <button type="submit" class="btn btn-primary mt-2">Consultar</button>
+    </form>
+
+    {% if resultados %}
+        <h4>Resultado da Consulta</h4>
+        <div class="tabela-scroll">
+            {{ resultados|safe }}
+        </div>
+
+        <h4 class="mt-4">Viagens em Aberto</h4>
+        <div class="tabela-scroll">{{ aberto_html|safe }}</div>
+
+        <h4 class="mt-4">Viagens Ociosas</h4>
+        <div class="tabela-scroll">{{ ociosas_html|safe }}</div>
+
+        <h4 class="mt-4">Viagens Inconsistentes</h4>
+        <div class="tabela-scroll">{{ inconsistentes_html|safe }}</div>
+
+        <h4 class="mt-4">Viagens com Atraso</h4>
+        <div class="tabela-scroll">{{ atraso_html|safe }}</div>
+    {% elif error %}
+        <div class="alert alert-warning mt-4">{{ error }}</div>
+    {% endif %}
+</body>
+</html>

@@ -1,87 +1,125 @@
-# Importações
 from flask import Flask, render_template, request
-from pyngrok import ngrok
-import pandas as pd
 import requests
-from datetime import datetime
-import os
+import pandas as pd
 
-# Configuração opcional do token do ngrok (apenas 1x por máquina)
-ngrok.set_auth_token('2iu7X2ds0blGAPc1qFhMnL4fyTj_5QJoq1GZVUN1D2Fv4uurC')
-
-# Flask app
 app = Flask(__name__)
-PORT = 5000
 
-# Função para buscar dados
-def fetch_data(data, empresa, token):
-    url_viagens = f"http://servicos.cittati.com.br/WSIntegracaoCittati/Operacional/ConsultarViagens?data={data}&empresa={empresa}"
-    headers = {
-        "Content-type": "application/json",
-        "Authorization": f"Basic {token}"
-    }
-    response = requests.get(url_viagens, headers=headers)
-    return response.json() if response.status_code == 200 else None
+EMPRESA = "regimilson.silva@axe.gevan.com.br"
+URL_AUTH = "http://servicos.cittati.com.br/WSIntegracaoCittati/Autenticacao/AutenticarUsuario/"
+URL_VIAGENS_BASE = "http://servicos.cittati.com.br/WSIntegracaoCittati/Operacional/ConsultarViagens"
+AUTH_HEADER = {
+    "Content-type": "application/json",
+    "Authorization": "Basic V1NJbnRlZ3JhY2FvUExUOndzcGx0"
+}
 
-# Processamento dos dados
-def process_data(data):
-    df = pd.DataFrame(data["viagens"])
-    df = df[df['veiculo'] != "VNR"]
-    df_filtered = df[(df['inicioRealizado'].isna()) | (df['fimRealizado'].isna())]
-    return df_filtered.sort_values(by='linha')
+def autenticar_usuario():
+    response = requests.post(URL_AUTH, headers=AUTH_HEADER, json={})
+    if response.status_code == 200:
+        return response.json().get("token")
+    return None
 
-# Rota principal
+def consultar_viagens(token, data, empresa=EMPRESA, colunas=None):
+    data_formatada = pd.to_datetime(data, dayfirst=True).strftime('%d/%m/%Y')
+    url = f"{URL_VIAGENS_BASE}?data={data_formatada}&empresa={empresa}"
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        viagens = response.json().get("viagens", [])
+        if not viagens:
+            return None
+        df = pd.DataFrame(viagens)
+        if colunas:
+            df = df[colunas]
+        for col in ["inicioProgramado", "inicioRealizado", "fimProgramado", "fimRealizado"]:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%H:%M:%S')
+        return df
+    return None
+
+def aplicar_filtros(df, filtros):
+    for coluna, valor in filtros.items():
+        if valor:
+            df = df[df[coluna].astype(str).str.contains(valor, case=False, na=False)]
+    return df
+
+def viagens_em_aberto(df):
+    df_sem_vnr = df[df['veiculo'].str.upper() != "VNR"]
+    filtro_aberto = df_sem_vnr['inicioRealizado'].isna() | df_sem_vnr['fimRealizado'].isna()
+    aberto = df_sem_vnr[filtro_aberto].sort_values(by='inicioProgramado')
+    return aberto
+
+def viagens_ociosas(df):
+    saida = df[df['atividade'] == 'Saída de Garagem']
+    recolhe = df[df['atividade'] == 'Recolhe']
+    veic_saida_sem_recolhe = saida[~saida['veiculo'].isin(recolhe['veiculo'])]
+    veic_recolhe_sem_saida = recolhe[~recolhe['veiculo'].isin(saida['veiculo'])]
+    sem_pares = pd.concat([veic_saida_sem_recolhe, veic_recolhe_sem_saida])
+    return sem_pares[['veiculo']].drop_duplicates()
+
+def viagens_inconsistentes(df):
+    df_sem_vnr = df[~df['veiculo'].str.contains('VNR', case=False, na=False)].copy()
+    df_sem_vnr['inicioRealizado'] = pd.to_datetime(df_sem_vnr['inicioRealizado'], errors='coerce')
+    duplicados = df_sem_vnr[df_sem_vnr.duplicated(subset=['veiculo', 'inicioRealizado'], keep=False)]
+    return duplicados[['veiculo', 'inicioProgramado', 'inicioRealizado', 'fimProgramado', 'fimRealizado']]
+
+def viagens_com_atraso(df):
+    df = df.copy()
+    df['inicioProgramado_dt'] = pd.to_datetime(df['inicioProgramado'], errors='coerce')
+    df['inicioRealizado_dt'] = pd.to_datetime(df['inicioRealizado'], errors='coerce')
+    df['Atraso'] = (df['inicioRealizado_dt'] - df['inicioProgramado_dt']).dt.total_seconds() > 6 * 60
+    filtro = (df['atividade'] == 'Viagem Normal') & (df['sentido'] == 'I') & (df['Atraso'] == True)
+    atrasadas = df.loc[filtro, ['atividade', 'linha', 'veiculo', 'sentido', 'tabela', 'inicioProgramado', 'inicioRealizado', 'Atraso']]
+    return atrasadas.sort_values(by='inicioProgramado')
+
 @app.route("/", methods=["GET", "POST"])
 def index():
-    if request.method == "POST":
-        data = request.form.get("data")
-        empresa = request.form.get("empresa")
-        token = request.form.get("token")
+    data_consulta = request.form.get("data") or pd.Timestamp.today().strftime('%d/%m/%Y')
 
-        data = datetime.strptime(data, "%d/%m/%Y").strftime("%Y-%m-%d")
-        response_data = fetch_data(data, empresa, token)
+    filtros = {
+        "atividade": request.form.get("atividade", "").strip(),
+        "linha": request.form.get("linha", "").strip(),
+        "veiculo": request.form.get("veiculo", "").strip(),
+        "sentido": request.form.get("sentido", "").strip(),
+        "tabela": request.form.get("tabela", "").strip(),
+    }
 
-        if response_data:
-            df = process_data(response_data)
-            if not df.empty:
-                return render_template("index.html", tables=[df.to_html(classes='data')], titles=df.columns.values)
-            else:
-                return "Nenhum dado encontrado após o processamento."
-        else:
-            return "Falha na obtenção de dados."
-    return render_template("index.html")
+    token = autenticar_usuario()
+    if not token:
+        return "Erro na autenticação", 500
 
-# Criação da pasta templates e HTML
-os.makedirs('templates', exist_ok=True)
-with open('templates/index.html', 'w') as f:
-    f.write("""
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><title>Consulta de Viagens</title></head>
-<body>
-    <h1>Consulta de Viagens</h1>
-    <form method="POST">
-        <label for="data">Data (dd/mm/yyyy):</label>
-        <input type="text" id="data" name="data" required><br>
-        <label for="empresa">Empresa:</label>
-        <input type="text" id="empresa" name="empresa" required><br>
-        <label for="token">Token:</label>
-        <input type="text" id="token" name="token" required><br>
-        <button type="submit">Consultar</button>
-    </form>
-    {% if tables %}
-        <h2>Resultados</h2>
-        {% for table in tables %}
-            {{ table|safe }}
-        {% endfor %}
-    {% endif %}
-</body>
-</html>
-""")
+    colunas = [
+        "atividade", "linha", "veiculo", "sentido", "tabela",
+        "inicioProgramado", "inicioRealizado", "fimProgramado", "fimRealizado"
+    ]
+    df = consultar_viagens(token, data_consulta, colunas=colunas)
+    if df is None:
+        return render_template("index.html", data=data_consulta, resultados=None, filtros=filtros, error="Nenhuma viagem encontrada.")
 
-# Inicia túnel ngrok
-public_url = ngrok.connect(PORT)
-print(f"Public URL: {public_url}")
+    df_filtrado = aplicar_filtros(df, filtros)
 
-# Executa o app
-app.run(port=PORT)
+    resultados_html = df_filtrado.to_html(classes="table table-striped", index=False)
+
+    # Tabelas extras
+    em_aberto = viagens_em_aberto(df_filtrado).to_html(classes="table table-sm", index=False)
+    ociosas = viagens_ociosas(df_filtrado).to_html(classes="table table-sm", index=False)
+    inconsistentes = viagens_inconsistentes(df_filtrado).to_html(classes="table table-sm", index=False)
+    com_atraso = viagens_com_atraso(df_filtrado).to_html(classes="table table-sm", index=False)
+
+    return render_template(
+        "index.html",
+        data=data_consulta,
+        resultados=resultados_html,
+        filtros=filtros,
+        aberto_html=em_aberto,
+        ociosas_html=ociosas,
+        inconsistentes_html=inconsistentes,
+        atraso_html=com_atraso
+    )
+
+
+if __name__ == "__main__":
+    from os import environ
+    port = int(environ.get("PORT", 5001))  # Usa a porta do ambiente ou 5001 como padrão
+    app.run(host="0.0.0.0", port=port)
+
+
