@@ -3,5 +3,5 @@ services:
     name: meu-projeto
     env: python
     root: meu_projeto
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip3 install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
